@@ -123,7 +123,7 @@ All exports from `@yuken-studios/design-system`:
 **Primitives**
 - `Text` — typography-aware text. Prefer over RN `Text`.
 - `TextInput` — themed input. Prefer over RN `TextInput`.
-- `Button` — primary/secondary/ghost button. Prefer over `Pressable` for CTAs.
+- `Button` — primary/secondary/ghost button. Prefer over `Pressable` for CTAs. Shapes: `default`, `pill`, `circle` (56×56 fixed square, use for FABs — no padding overrides needed). Variants: `primary`, `secondary`, `ghost`, `danger`, `accent`. Sizes: `sm`, `md`, `lg`.
 
 **Content containers**
 - `Card` — padded, bordered surface.
@@ -151,11 +151,17 @@ All exports from `@yuken-studios/design-system`:
 - `BottomSheet` — slide-up sheet.
 - `ToastProvider` + `useToast()` — global toast queue. Mount `ToastProvider` inside `ThemeProvider` once.
 
-**Skeletons**
+**Skeletons & loading**
 - `Skeleton`, `SkeletonCard`, `SkeletonListItem`, `SkeletonText` — loading placeholders.
+- `ShimmerText` — cycles through placeholder text examples with a fade + shimmer effect. Props: `examples: string[]`, `interval?: number` (default 2400ms), `fadeDuration?: number` (480ms), `width?: number`, `paddingX?: number` (6), `textStyle?: TextStyle`, `style?: ViewStyle`.
+
+**Data visualization**
+- `SpendChart` — interactive horizontal-scroll monthly spending chart with category breakdowns, bar selection, and infinite-load support. Props: `bars: SpendBar[]`, `selectedKey: string`, `onSelect: (key: string) => void`, `onNearStart?: () => void`, `onBarSnap?: () => void`, `onCategoryTap?: () => void`, `canLoadMore?: boolean`, `emptyState?: ReactNode`.
+  - `SpendBar` — `{ monthKey, label, yearLabel, total, isLoading, categories?: CategorySpend[] }`.
+  - `CategorySpend` — `{ name, total, percentage }`.
 
 **Exported type names** (for props, casting, and documentation):
-`ButtonProps`, `TextProps`, `TextInputProps`, `CardProps`, `BadgeProps`, `TagProps`, `AvatarProps`, `AvatarGroupProps`, `AvatarSize`, `AvatarColor`, `AvatarShape`, `AvatarPresence`, `ToggleProps`, `CheckboxProps`, `RadioProps`, `ToastConfig`, `AlertProps`, `ModalProps`, `BottomSheetProps`, `SelectProps`, `SelectOption`, `TabItem`, `TabsProps`, `BottomNavItem`, `BottomNavProps`, `ProgressBarProps`, `StepProgressProps`, `SkeletonProps`, `DividerProps`, `SpacerProps`, `ListItemProps`.
+`ButtonProps`, `TextProps`, `TextInputProps`, `CardProps`, `BadgeProps`, `TagProps`, `AvatarProps`, `AvatarGroupProps`, `AvatarSize`, `AvatarColor`, `AvatarShape`, `AvatarPresence`, `ToggleProps`, `CheckboxProps`, `RadioProps`, `ToastConfig`, `AlertProps`, `ModalProps`, `BottomSheetProps`, `SelectProps`, `SelectOption`, `TabItem`, `TabsProps`, `BottomNavItem`, `BottomNavProps`, `ProgressBarProps`, `StepProgressProps`, `SkeletonProps`, `DividerProps`, `SpacerProps`, `ListItemProps`, `ShimmerTextProps`, `SpendChartProps`, `SpendBar`, `CategorySpend`.
 
 When you're unsure about a component's exact prop shape, open its source in `node_modules/@yuken-studios/design-system/dist/typescript/components/<Name>/<Name>.d.ts` — that's faster and more reliable than guessing.
 

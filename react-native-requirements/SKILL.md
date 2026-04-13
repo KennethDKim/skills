@@ -171,6 +171,177 @@ Use instead of React Native's `Image`. Supports blurhash placeholders, proper di
 
 ---
 
+### Maps — `react-native-maps`
+Recommended for all map rendering needs. Wraps Apple Maps (iOS) and Google Maps (Android) with a unified React Native API.
+
+```tsx
+import MapView, { Marker } from 'react-native-maps'
+
+<MapView
+  style={{ flex: 1 }}
+  initialRegion={{ latitude: 37.78, longitude: -122.43, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
+>
+  <Marker coordinate={{ latitude: 37.78, longitude: -122.43 }} title="Pin" />
+</MapView>
+```
+
+---
+
+### Location — `expo-location`
+Recommended for all device location services. Handles permissions, foreground/background location, geocoding, and heading.
+
+```ts
+import * as Location from 'expo-location'
+
+const { status } = await Location.requestForegroundPermissionsAsync()
+if (status !== 'granted') return
+const { coords } = await Location.getCurrentPositionAsync({})
+```
+
+For background tracking, use `Location.startLocationUpdatesAsync` with a defined task (requires `expo-task-manager`).
+
+---
+
+### In-App Purchases (iOS) — `expo-iap`
+
+Expo-compatible wrapper around StoreKit 2. Handles subscriptions, non-consumables, and consumables with a hook-based API. Do not use `react-native-iap` directly in Expo managed projects.
+
+#### Setup
+
+1. Configure products in App Store Connect first (subscriptions, non-consumables, etc.)
+2. Install: `npx expo install expo-iap`
+3. Add the plugin to `app.json`:
+```json
+{ "expo": { "plugins": ["expo-iap"] } }
+```
+4. IAP only works on **real devices** — it will not function in Simulator.
+
+#### Architecture pattern
+
+Split IAP into four modules:
+
+```
+src/iap/
+  products.ts   — SKU constants, type exports, productId→entitlement mapping
+  store.ts      — Zustand store for entitlement state + hydration
+  service.ts    — useIAPService() hook wrapping useIAP() from expo-iap
+  api.ts        — fetch helpers for your verification backend
+```
+
+#### Products module
+
+```ts
+export const IAP_PRODUCTS = {
+  UNLOCK: 'com.example.unlock',
+} as const;
+
+export type IAPProductId = (typeof IAP_PRODUCTS)[keyof typeof IAP_PRODUCTS];
+export const NON_CONSUMABLE_SKUS: string[] = [IAP_PRODUCTS.UNLOCK];
+
+export function productToEntitlement(productId: string): string | null {
+  if (productId === IAP_PRODUCTS.UNLOCK) return 'premium';
+  return null;
+}
+```
+
+#### Service hook — critical pitfalls
+
+```ts
+import { ErrorCode, useIAP, getAvailablePurchases } from 'expo-iap';
+
+export function useIAPService() {
+  const { connected, products, finishTransaction, fetchProducts, requestPurchase } = useIAP({
+    onPurchaseSuccess: async (purchase) => {
+      try {
+        // Verify with your backend
+        const result = await verifyTransaction({ ... });
+        if (result.valid) await store.setEntitlement(result.entitlement);
+      } finally {
+        // CRITICAL: Always finish — unfinished transactions block ALL future purchases
+        await finishTransaction({ purchase, isConsumable: false });
+      }
+    },
+    onPurchaseError: (error) => {
+      // Silence user cancellations — they're not errors
+      if (error.code !== ErrorCode.UserCancelled) {
+        console.warn('[IAP] purchase error', error);
+      }
+    },
+  });
+
+  // Fetch products by type — must be separate calls
+  useEffect(() => {
+    if (!connected) return;
+    fetchProducts({ skus: SUBSCRIPTION_SKUS, type: 'subs' }).catch(console.warn);
+    fetchProducts({ skus: NON_CONSUMABLE_SKUS, type: 'in-app' }).catch(console.warn);
+  }, [connected, fetchProducts]);
+
+  const purchase = async (sku: string) => {
+    try {
+      await requestPurchase({
+        request: { apple: { sku, appAccountToken: deviceId } },
+        type: 'in-app', // or 'subs' for subscriptions
+      });
+    } catch (e: any) {
+      // PITFALL: requestPurchase ALSO throws on cancellation, independently of onPurchaseError
+      if (e?.code === ErrorCode.UserCancelled || e?.message?.includes('User cancelled')) return;
+      throw e;
+    }
+  };
+}
+```
+
+**Key pitfalls:**
+
+| Pitfall | Detail |
+|---|---|
+| `requestPurchase` throws on cancel | `onPurchaseError` catches some errors, but `requestPurchase` itself **also throws** when the user cancels. You need try/catch in both places or you get an unhandled promise rejection. |
+| `finishTransaction` is mandatory | If you skip it (even on verify failure), the App Store considers the transaction pending. Future `requestPurchase` calls will hang or fail silently. Always call in `finally`. |
+| `fetchProducts` per type | You must call `fetchProducts` separately for `'subs'` and `'in-app'` — a single call with mixed SKUs will only return one type. |
+| `appAccountToken` | Pass a stable device/user ID as `appAccountToken` in the purchase request. This is how you link Apple transactions to your backend user. UUID format recommended. |
+| Products array uses `id` not `productId` | `useIAP().products` returns objects where the SKU is in the `id` field, not `productId`. Use `.find(p => p.id === sku)`. |
+| Sandbox vs Production | StoreKit 2 sandbox transactions look identical to production. Your backend must handle both `environment` values (`Sandbox` / `Production`) and hit the correct Apple API endpoint. |
+
+#### Server-side verification (Cloudflare Worker pattern)
+
+A minimal verification backend needs:
+1. **Decode the JWS** — Apple StoreKit 2 transactions are signed JWS tokens. Decode the payload (base64url) to extract `transactionId`, `productId`, `bundleId`, `environment`, `expiresDate`, `revocationDate`.
+2. **Validate `bundleId`** — always check `tx.bundleId === YOUR_BUNDLE_ID` to prevent cross-app replay.
+3. **Check `appAccountToken`** — match against the requesting device ID.
+4. **Optional: cross-check with App Store Server API v2** — call `/inApps/v2/history/{originalTransactionId}` for server-side confirmation. Requires an Apple JWT signed with your App Store Connect API key.
+5. **Store entitlements** — upsert into your database keyed by `(device_id)` for single-app or `(device_id, bundle_id)` for multi-app.
+6. **Handle webhooks** — Apple sends App Store Server Notifications v2 to your endpoint for subscription renewals, refunds, and revocations.
+
+**Multi-app note:** If you want to share a verification worker across multiple apps, you need: composite key `(device_id, bundle_id)` in your entitlements table, a `bundleId` allow-list instead of a single env var, and a data-driven `productToEntitlement` mapping. It's often simpler to deploy one worker per app sharing the same code.
+
+#### Restore flow
+
+```ts
+const restore = async (): Promise<boolean> => {
+  const purchases = await getAvailablePurchases();
+  for (const p of purchases) {
+    const result = await verifyTransaction({ ... });
+    if (result.valid) { await store.setEntitlement(result.entitlement); return true; }
+  }
+  await store.setEntitlement('none');
+  return false;
+};
+```
+
+Apple requires a visible "Restore Purchases" button — this is an App Store Review guideline. Debounce it to prevent rapid-fire calls.
+
+#### Non-consumable vs Subscription differences
+
+| Aspect | Non-consumable | Subscription |
+|---|---|---|
+| `type` param | `'in-app'` | `'subs'` |
+| `expiresDate` | `null` (permanent) | epoch ms |
+| Grace period | Not needed | Implement offline grace (e.g. 3 days past expiry) |
+| Server re-verify | Once at purchase + restore | Periodic (e.g. daily) to catch cancellations |
+| Renewal webhooks | N/A | Must handle `DID_RENEW`, `EXPIRED`, `DID_CHANGE_RENEWAL_STATUS` |
+
+---
+
 ## Decision guide
 
 | Situation | Action |
@@ -180,6 +351,9 @@ Use instead of React Native's `Image`. Supports blurhash placeholders, proper di
 | No offline requirement | Skip expo-sqlite + drizzle |
 | Non-PocketBase backend | Replace PB SDK with fetch/ky; keep react-query |
 | Auth via third-party SSO only | expo-auth-session is acceptable |
+| App needs IAP (iOS) | Use expo-iap; split into products/store/service/api modules |
+| IAP non-consumable only | Skip expiresAt, grace period, and renewal webhook handling |
+| Multiple apps sharing IAP backend | Deploy separate workers or add bundle_id composite keys |
 
 ---
 
