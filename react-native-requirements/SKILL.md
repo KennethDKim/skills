@@ -216,6 +216,17 @@ Expo-compatible wrapper around StoreKit 2. Handles subscriptions, non-consumable
 ```
 4. IAP only works on **real devices** — it will not function in Simulator.
 
+#### Dev environment for IAP testing
+
+**Use `npx expo run:ios --device` (local dev build), not an EAS production build.**
+
+- Compiles all native modules including StoreKit locally (~10–15 min first build, incremental after)
+- Deploy directly to a connected physical device over USB
+- Test with sandbox Apple ID — real money never charged
+- Requires device registered in your Apple Developer account + signing team in Xcode
+
+EAS production builds are only needed at App Store submission time. Never block IAP development on an EAS build.
+
 #### Architecture pattern
 
 Split IAP into four modules:
